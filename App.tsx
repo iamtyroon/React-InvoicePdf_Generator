@@ -1,9 +1,8 @@
 
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
-import { GoogleGenAI, Type } from "@google/genai";
 import type { Invoice, InvoiceItem } from './types';
 import { COLORS, CURRENCIES, DEFAULT_INVOICE } from './constants';
-import { PlusIcon, XIcon, CheckIcon, ImageIcon, DownloadIcon, MailIcon, SunIcon, MoonIcon, FolderPlusIcon, FolderIcon, SparklesIcon } from './components/icons';
+import { PlusIcon, XIcon, CheckIcon, ImageIcon, DownloadIcon, MailIcon, SunIcon, MoonIcon, FolderPlusIcon, FolderIcon } from './components/icons';
 
 declare var jspdf: any;
 declare var html2canvas: any;
@@ -17,7 +16,6 @@ interface SavedInvoice {
 const App: React.FC = () => {
     const [invoice, setInvoice] = useState<Invoice>(DEFAULT_INVOICE);
     const [isGenerating, setIsGenerating] = useState(false);
-    const [isAiModalOpen, setIsAiModalOpen] = useState(false);
     const [drafts, setDrafts] = useState<SavedInvoice[]>([]);
     const invoiceRef = useRef<HTMLDivElement>(null);
     const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -47,63 +45,6 @@ const App: React.FC = () => {
             console.error("Failed to load drafts from local storage:", error);
             localStorage.removeItem('invoice-drafts');
         }
-    }, []);
-
-    const handleAiGenerate = useCallback(async (prompt: string): Promise<void> => {
-        if (!prompt) return;
-
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
-        
-        const systemInstruction = "You are an expert invoice processing AI. Your task is to analyze the user's request and extract all relevant information to create a complete invoice. Populate the fields based on the user's input and return the data in the specified JSON format. For any missing fields, use empty strings or sensible defaults (like 1 for quantity if not specified). Ensure the date is in 'YYYY-MM-DD' format.";
-
-        const responseSchema = {
-            type: Type.OBJECT,
-            properties: {
-                from: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, email: { type: Type.STRING }, address: { type: Type.STRING }, phone: { type: Type.STRING }, businessNumber: { type: Type.STRING }}},
-                to: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, email: { type: Type.STRING }, address: { type: Type.STRING }, phone: { type: Type.STRING }, mobile: { type: Type.STRING }, fax: { type: Type.STRING }}},
-                number: { type: Type.STRING },
-                date: { type: Type.STRING, description: "Use YYYY-MM-DD format." },
-                terms: { type: Type.STRING },
-                items: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            description: { type: Type.STRING },
-                            details: { type: Type.STRING },
-                            quantity: { type: Type.NUMBER },
-                            rate: { type: Type.NUMBER },
-                        },
-                        required: ['description', 'quantity', 'rate'],
-                    },
-                },
-            },
-        };
-
-        const fullPrompt = `${systemInstruction}\n\nUser request: "${prompt}"`;
-
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: fullPrompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: responseSchema,
-            },
-        });
-
-        const jsonText = response.text;
-        const parsedData = JSON.parse(jsonText);
-
-        setInvoice(prev => ({
-            ...prev,
-            ...parsedData,
-            from: { ...prev.from, ...parsedData.from },
-            to: { ...prev.to, ...parsedData.to },
-            items: parsedData.items ? parsedData.items.map((item: Omit<InvoiceItem, 'id'>) => ({
-                ...item,
-                id: crypto.randomUUID(),
-            })) : prev.items,
-        }));
     }, []);
 
     const saveDraftsToLocalStorage = (newDrafts: SavedInvoice[]) => {
@@ -284,23 +225,16 @@ const App: React.FC = () => {
 
     return (
         <div className="min-h-screen bg-background font-sans text-foreground">
-            <Header 
-                onGeneratePdf={generatePdf} 
-                isGenerating={isGenerating} 
+            <Header
+                onGeneratePdf={generatePdf}
+                isGenerating={isGenerating}
                 theme={theme}
                 toggleTheme={toggleTheme}
                 onSaveDraft={handleSaveDraft}
                 drafts={drafts}
                 onLoadDraft={handleLoadDraft}
                 onDeleteDraft={handleDeleteDraft}
-                onOpenAiModal={() => setIsAiModalOpen(true)}
             />
-            {isAiModalOpen && (
-                <AiAssistantModal 
-                    onClose={() => setIsAiModalOpen(false)}
-                    onGenerate={handleAiGenerate}
-                />
-            )}
             <main className="container mx-auto px-4 py-8">
                 <div className="flex flex-col lg:flex-row gap-8">
                     <div className="lg:w-2/3">
@@ -332,8 +266,8 @@ const App: React.FC = () => {
     );
 };
 
-const Header: React.FC<{ 
-    onGeneratePdf: () => void; 
+const Header: React.FC<{
+    onGeneratePdf: () => void;
     isGenerating: boolean;
     theme: 'light' | 'dark';
     toggleTheme: () => void;
@@ -341,20 +275,12 @@ const Header: React.FC<{
     drafts: SavedInvoice[];
     onLoadDraft: (id: string) => void;
     onDeleteDraft: (id: string) => void;
-    onOpenAiModal: () => void;
-}> = ({ onGeneratePdf, isGenerating, theme, toggleTheme, onSaveDraft, drafts, onLoadDraft, onDeleteDraft, onOpenAiModal }) => (
+}> = ({ onGeneratePdf, isGenerating, theme, toggleTheme, onSaveDraft, drafts, onLoadDraft, onDeleteDraft }) => (
     <header className="bg-card/80 backdrop-blur-sm border-b border-border sticky top-0 z-20">
         <div className="container mx-auto px-4 py-3 flex justify-between items-center">
             <h1 className="text-xl font-bold text-card-foreground">Invoice Generator</h1>
             <div className="flex items-center gap-2">
-                 <button 
-                    onClick={onOpenAiModal}
-                    className="px-4 py-2 text-sm font-medium rounded-md flex items-center gap-2 transition-colors bg-secondary text-secondary-foreground hover:bg-secondary/80"
-                >
-                    <SparklesIcon className="w-4 h-4" />
-                    AI Assistant
-                </button>
-                <button 
+                <button
                     onClick={onSaveDraft}
                     className="px-4 py-2 text-sm font-medium rounded-md flex items-center gap-2 transition-colors bg-secondary text-secondary-foreground hover:bg-secondary/80"
                 >
@@ -385,76 +311,6 @@ const Header: React.FC<{
         </div>
     </header>
 );
-
-const AiAssistantModal: React.FC<{
-    onClose: () => void;
-    onGenerate: (prompt: string) => Promise<void>;
-}> = ({ onClose, onGenerate }) => {
-    const [prompt, setPrompt] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const modalRef = useRef<HTMLDivElement>(null);
-
-    const handleGenerateClick = async () => {
-        setIsLoading(true);
-        setError(null);
-        try {
-            await onGenerate(prompt);
-            onClose();
-        } catch (err) {
-            console.error(err);
-            setError('Failed to generate invoice. Please check your prompt or try again later.');
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
-                onClose();
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => {
-            document.removeEventListener('mousedown', handleClickOutside);
-        };
-    }, [onClose]);
-
-    return (
-        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-40 flex items-center justify-center p-4">
-            <div ref={modalRef} className="bg-card border border-border rounded-lg shadow-xl w-full max-w-2xl p-6 relative">
-                <button onClick={onClose} className="absolute top-4 right-4 text-muted-foreground hover:text-foreground">
-                    <XIcon className="w-5 h-5" />
-                </button>
-                <h2 className="text-xl font-semibold text-card-foreground mb-4">AI Invoice Assistant</h2>
-                <p className="text-sm text-muted-foreground mb-4">
-                    Describe the invoice you want to create. Include client name, items, quantities, and rates. The AI will fill out the form for you.
-                </p>
-                <textarea
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                    placeholder="e.g., Invoice John Smith for 10 hours of consulting at $100/hr and a $50 project fee..."
-                    className="w-full p-2 bg-input border border-input rounded-md focus:ring-2 focus:ring-ring focus:outline-none h-32 resize-none"
-                    disabled={isLoading}
-                />
-                {error && <p className="text-sm text-destructive mt-2">{error}</p>}
-                <div className="mt-4 flex justify-end gap-2">
-                    <button onClick={onClose} className="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-secondary text-secondary-foreground hover:bg-secondary/80" disabled={isLoading}>
-                        Cancel
-                    </button>
-                    <button
-                        onClick={handleGenerateClick}
-                        className="px-4 py-2 text-sm font-medium rounded-md flex items-center gap-2 transition-colors bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-primary/50 disabled:cursor-not-allowed"
-                        disabled={isLoading || !prompt}
-                    >
-                        {isLoading ? 'Generating...' : 'Generate Invoice'}
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-};
 
 const DraftsDropdown: React.FC<{
     drafts: SavedInvoice[];
